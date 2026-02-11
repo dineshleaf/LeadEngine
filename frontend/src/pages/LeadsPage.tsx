@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { Plus, Upload, Play, Download, Trash2, Search, ExternalLink } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Plus, Upload, Play, Download, Trash2, Search, ExternalLink, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLeads, createLead, createLeadsBulk, uploadCSV, deleteLead } from '../api/leads'
 import { triggerAnalysis, triggerBulkAnalysis } from '../api/analysis'
@@ -31,12 +31,49 @@ export default function LeadsPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [ecommerceOnly, setEcommerceOnly] = useState(false)
+  const [withGaps, setWithGaps] = useState(false)
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
 
+  // Read filters from URL on mount / URL change
+  useEffect(() => {
+    const urlStatus = searchParams.get('status') || ''
+    const urlEcommerce = searchParams.get('ecommerce_only') === 'true'
+    const urlGaps = searchParams.get('with_gaps') === 'true'
+    setStatusFilter(urlStatus)
+    setEcommerceOnly(urlEcommerce)
+    setWithGaps(urlGaps)
+  }, [searchParams])
+
+  const clearAllFilters = () => {
+    setSearch('')
+    setStatusFilter('')
+    setEcommerceOnly(false)
+    setWithGaps(false)
+    setSearchParams({})
+  }
+
+  const hasActiveFilters = statusFilter || ecommerceOnly || withGaps
+
+  const activeFilterLabel = ecommerceOnly
+    ? 'E-commerce Confirmed'
+    : withGaps
+      ? 'With Gaps Found'
+      : statusFilter
+        ? statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)
+        : null
+
   const { data: leads = [], isLoading } = useQuery<Lead[]>({
-    queryKey: ['leads', search, statusFilter],
-    queryFn: () => getLeads({ search: search || undefined, status: statusFilter || undefined, per_page: 200 }),
+    queryKey: ['leads', search, statusFilter, ecommerceOnly, withGaps],
+    queryFn: () => getLeads({
+      search: search || undefined,
+      status: statusFilter || undefined,
+      ecommerce_only: ecommerceOnly || undefined,
+      with_gaps: withGaps || undefined,
+      per_page: 200,
+    }),
     refetchInterval: 5000,
   })
 
@@ -115,6 +152,19 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* Active filter banner */}
+      {hasActiveFilters && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2.5">
+          <span className="text-sm text-blue-700">Filtered by:</span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-3 py-0.5 text-sm font-medium text-blue-800">
+            {activeFilterLabel}
+            <button onClick={clearAllFilters} className="ml-1 rounded-full p-0.5 hover:bg-blue-200">
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="mb-4 flex gap-3">
         <div className="relative flex-1 max-w-md">
@@ -129,7 +179,14 @@ export default function LeadsPage() {
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setEcommerceOnly(false)
+            setWithGaps(false)
+            const params: Record<string, string> = {}
+            if (e.target.value) params.status = e.target.value
+            setSearchParams(params)
+          }}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
         >
           <option value="">All statuses</option>

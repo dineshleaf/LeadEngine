@@ -6,6 +6,8 @@ export async function getLeads(params?: {
   per_page?: number
   status?: string
   search?: string
+  ecommerce_only?: boolean
+  with_gaps?: boolean
 }): Promise<Lead[]> {
   const { data } = await api.get('/leads', { params })
   return data

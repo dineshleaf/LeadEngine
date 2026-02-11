@@ -1,16 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { BarChart3, Globe, TrendingUp, AlertTriangle, CheckCircle, Clock, XCircle } from 'lucide-react'
 import { getStats } from '../api/leads'
 import type { Stats } from '../types'
 
-function StatCard({ label, value, icon: Icon, color }: {
+function StatCard({ label, value, icon: Icon, color, onClick }: {
   label: string
   value: number
   icon: React.ElementType
   color: string
+  onClick?: () => void
 }) {
   return (
-    <div className="flex items-center gap-4 rounded-xl bg-white p-6 shadow-sm border border-gray-100">
+    <div
+      onClick={onClick}
+      className={`flex items-center gap-4 rounded-xl bg-white p-6 shadow-sm border border-gray-100 transition-all ${
+        onClick ? 'cursor-pointer hover:shadow-md hover:border-gray-200 active:scale-[0.98]' : ''
+      }`}
+    >
       <div className={`flex h-12 w-12 items-center justify-center rounded-lg ${color}`}>
         <Icon className="h-6 w-6 text-white" />
       </div>
@@ -23,6 +30,7 @@ function StatCard({ label, value, icon: Icon, color }: {
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const { data: stats, isLoading } = useQuery<Stats>({
     queryKey: ['stats'],
     queryFn: getStats,
@@ -45,16 +53,16 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Leads" value={stats.total_leads} icon={Globe} color="bg-blue-500" />
-        <StatCard label="Analyzed" value={stats.analyzed} icon={CheckCircle} color="bg-green-500" />
-        <StatCard label="E-commerce Confirmed" value={stats.ecommerce_confirmed} icon={TrendingUp} color="bg-purple-500" />
-        <StatCard label="With Gaps Found" value={stats.with_gaps} icon={AlertTriangle} color="bg-orange-500" />
+        <StatCard label="Total Leads" value={stats.total_leads} icon={Globe} color="bg-blue-500" onClick={() => navigate('/leads')} />
+        <StatCard label="Analyzed" value={stats.analyzed} icon={CheckCircle} color="bg-green-500" onClick={() => navigate('/leads?status=completed')} />
+        <StatCard label="E-commerce Confirmed" value={stats.ecommerce_confirmed} icon={TrendingUp} color="bg-purple-500" onClick={() => navigate('/leads?ecommerce_only=true')} />
+        <StatCard label="With Gaps Found" value={stats.with_gaps} icon={AlertTriangle} color="bg-orange-500" onClick={() => navigate('/leads?with_gaps=true')} />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <StatCard label="Pending" value={stats.pending} icon={Clock} color="bg-gray-400" />
-        <StatCard label="Analyzing" value={stats.analyzing} icon={BarChart3} color="bg-yellow-500" />
-        <StatCard label="Failed" value={stats.failed} icon={XCircle} color="bg-red-500" />
+        <StatCard label="Pending" value={stats.pending} icon={Clock} color="bg-gray-400" onClick={() => navigate('/leads?status=pending')} />
+        <StatCard label="Analyzing" value={stats.analyzing} icon={BarChart3} color="bg-yellow-500" onClick={() => navigate('/leads?status=analyzing')} />
+        <StatCard label="Failed" value={stats.failed} icon={XCircle} color="bg-red-500" onClick={() => navigate('/leads?status=failed')} />
       </div>
 
       <div className="mt-10 rounded-xl bg-white p-6 shadow-sm border border-gray-100">

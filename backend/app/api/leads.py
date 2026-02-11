@@ -129,6 +129,8 @@ async def list_leads(
     status: Optional[str] = None,
     source: Optional[str] = None,
     search: Optional[str] = None,
+    ecommerce_only: bool = Query(False),
+    with_gaps: bool = Query(False),
     sort_by: str = "created_at",
     sort_order: str = "desc",
     db: AsyncSession = Depends(get_db),
@@ -143,6 +145,10 @@ async def list_leads(
         query = query.where(
             Lead.domain.ilike(f"%{search}%") | Lead.company_name.ilike(f"%{search}%")
         )
+    if ecommerce_only:
+        query = query.join(EcommerceData).where(EcommerceData.is_ecommerce.is_(True))
+    if with_gaps:
+        query = query.join(Pitch)
 
     sort_col = getattr(Lead, sort_by, Lead.created_at)
     if sort_order == "asc":
