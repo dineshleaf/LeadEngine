@@ -1,9 +1,10 @@
 import csv
 import io
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,49 +24,63 @@ from app.core.schemas import (
     StatsResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
 @router.post("", response_model=LeadResponse, status_code=201)
 async def create_lead(data: LeadCreate, db: AsyncSession = Depends(get_db)):
-    existing = await db.execute(select(Lead).where(Lead.domain == data.domain))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Lead for {data.domain} already exists")
+    try:
+        existing = await db.execute(select(Lead).where(Lead.domain == data.domain))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail=f"Lead for {data.domain} already exists")
 
-    lead = Lead(
-        domain=data.domain,
-        url=data.url or f"https://{data.domain}",
-        company_name=data.company_name,
-        source=data.source,
-    )
-    db.add(lead)
-    await db.flush()
-    await db.refresh(lead)
-    return lead
+        lead = Lead(
+            domain=data.domain,
+            url=data.url or f"https://{data.domain}",
+            company_name=data.company_name,
+            source=data.source,
+        )
+        db.add(lead)
+        await db.flush()
+        await db.refresh(lead)
+        return lead
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create lead for {data.domain}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.post("/bulk", response_model=list[LeadResponse], status_code=201)
 async def create_leads_bulk(data: LeadBulkCreate, db: AsyncSession = Depends(get_db)):
-    created = []
-    for raw_domain in data.domains:
-        domain = raw_domain.strip().lower()
-        for prefix in ("https://", "http://", "www."):
-            if domain.startswith(prefix):
-                domain = domain[len(prefix):]
-        domain = domain.rstrip("/")
-        if not domain:
-            continue
+    try:
+        created = []
+        for raw_domain in data.domains:
+            domain = raw_domain.strip().lower()
+            for prefix in ("https://", "http://", "www."):
+                if domain.startswith(prefix):
+                    domain = domain[len(prefix):]
+            domain = domain.rstrip("/")
+            if not domain:
+                continue
 
-        existing = await db.execute(select(Lead).where(Lead.domain == domain))
-        if existing.scalar_one_or_none():
-            continue
+            existing = await db.execute(select(Lead).where(Lead.domain == domain))
+            if existing.scalar_one_or_none():
+                continue
 
-        lead = Lead(domain=domain, url=f"https://{domain}", source=data.source)
-        db.add(lead)
-        await db.flush()
-        await db.refresh(lead)
-        created.append(lead)
-    return created
+            lead = Lead(domain=domain, url=f"https://{domain}", source=data.source)
+            db.add(lead)
+            await db.flush()
+            await db.refresh(lead)
+            created.append(lead)
+        return created
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create leads in bulk: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.post("/upload", response_model=list[LeadResponse], status_code=201)
@@ -73,32 +88,38 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     if not file.filename or not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
 
-    content = await file.read()
-    text = content.decode("utf-8-sig")
-    reader = csv.reader(io.StringIO(text))
+    try:
+        content = await file.read()
+        text = content.decode("utf-8-sig")
+        reader = csv.reader(io.StringIO(text))
 
-    domains = []
-    for row in reader:
-        if row:
-            domain = row[0].strip().lower()
-            for prefix in ("https://", "http://", "www."):
-                if domain.startswith(prefix):
-                    domain = domain[len(prefix):]
-            domain = domain.rstrip("/")
-            if domain and domain != "domain":
-                domains.append(domain)
+        domains = []
+        for row in reader:
+            if row:
+                domain = row[0].strip().lower()
+                for prefix in ("https://", "http://", "www."):
+                    if domain.startswith(prefix):
+                        domain = domain[len(prefix):]
+                domain = domain.rstrip("/")
+                if domain and domain != "domain":
+                    domains.append(domain)
 
-    created = []
-    for domain in domains:
-        existing = await db.execute(select(Lead).where(Lead.domain == domain))
-        if existing.scalar_one_or_none():
-            continue
-        lead = Lead(domain=domain, url=f"https://{domain}", source="csv_upload")
-        db.add(lead)
-        await db.flush()
-        await db.refresh(lead)
-        created.append(lead)
-    return created
+        created = []
+        for domain in domains:
+            existing = await db.execute(select(Lead).where(Lead.domain == domain))
+            if existing.scalar_one_or_none():
+                continue
+            lead = Lead(domain=domain, url=f"https://{domain}", source="csv_upload")
+            db.add(lead)
+            await db.flush()
+            await db.refresh(lead)
+            created.append(lead)
+        return created
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload CSV: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.get("", response_model=list[LeadResponse])

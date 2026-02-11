@@ -38,7 +38,9 @@ export default function AddLeadModal({ onClose, onSuccess }: Props) {
       toast.success(`Added ${domainList.length} lead(s)`)
       onSuccess()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to add leads')
+      const msg = err?.response?.data?.detail
+        || (err?.request ? 'Server not reachable — check deployment' : err?.message || 'Failed to add leads')
+      toast.error(msg)
     } finally {
       setLoading(false)
     }
@@ -55,7 +57,9 @@ export default function AddLeadModal({ onClose, onSuccess }: Props) {
       toast.success(`Imported ${result.length} lead(s)`)
       onSuccess()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to upload CSV')
+      const msg = err?.response?.data?.detail
+        || (err?.request ? 'Server not reachable — check deployment' : err?.message || 'Failed to upload CSV')
+      toast.error(msg)
     } finally {
       setLoading(false)
     }

@@ -54,7 +54,24 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 async def health_check():
-    return {"status": "healthy", "service": "LeadEngine"}
+    from app.core.database import async_session
+    from sqlalchemy import text
+    db_status = "unknown"
+    db_type = "unknown"
+    try:
+        async with async_session() as session:
+            result = await session.execute(text("SELECT 1"))
+            result.scalar()
+            db_status = "connected"
+            from app.config import settings
+            if "postgresql" in settings.database_url:
+                db_type = "postgresql"
+            elif "sqlite" in settings.database_url:
+                db_type = "sqlite"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+        logger.error(f"Health check DB error: {e}")
+    return {"status": "healthy", "service": "LeadEngine", "database": db_status, "db_type": db_type}
 
 
 # Serve React frontend static files in production
