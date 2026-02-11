@@ -15,7 +15,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 def utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.utcnow()
 
 
 class Base(DeclarativeBase):
