@@ -30,8 +30,13 @@ COPY backend/app ./app
 # Copy built frontend into backend/static
 COPY --from=frontend-builder /build/frontend/dist ./static
 
-# Railway provides PORT env var
+# Python env settings for production
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Railway provides PORT env var — default to 8000
 ENV PORT=8000
 EXPOSE 8000
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+# Use shell form so ${PORT} is expanded at runtime
+CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --log-level info

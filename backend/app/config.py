@@ -1,29 +1,22 @@
 import os
+import logging
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
 
-
-def _get_database_url() -> str:
-    """Build the async database URL from environment variables."""
-    # Railway provides DATABASE_URL in postgres:// format
-    url = os.environ.get("DATABASE_URL", "")
-    if url:
-        # Convert postgres:// to postgresql+asyncpg://
-        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        return url
-    return "sqlite+aiosqlite:///./leadengine.db"
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
-    # Database
-    database_url: str = _get_database_url()
+    # Database — Railway provides DATABASE_URL in postgres:// format
+    # We need to convert it to postgresql+asyncpg:// for SQLAlchemy async
+    database_url: str = "sqlite+aiosqlite:///./leadengine.db"
 
     # Server
     host: str = "0.0.0.0"
-    port: int = int(os.environ.get("PORT", "8000"))
-    debug: bool = os.environ.get("RAILWAY_ENVIRONMENT") is None
+    port: int = 8000
+    debug: bool = True
 
     # Rate Limiting
     requests_per_second: float = 2.0
@@ -44,6 +37,22 @@ class Settings(BaseSettings):
     request_timeout: int = 30
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def fix_database_url(self):
+        """Convert Railway's postgres:// URL to async-compatible format."""
+        url = self.database_url
+        if url.startswith("postgres://"):
+            self.database_url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://") and "+asyncpg" not in url:
+            self.database_url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Disable debug mode on Railway
+        if os.environ.get("RAILWAY_ENVIRONMENT"):
+            self.debug = False
+
+        logger.info(f"Database: {'PostgreSQL' if 'postgresql' in self.database_url else 'SQLite'}")
+        return self
 
 
 settings = Settings()

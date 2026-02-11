@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,11 +12,23 @@ from app.core.database import engine
 from app.core.models import Base
 from app.api.router import api_router
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        logger.info("Creating database tables...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables ready.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
     yield
     await engine.dispose()
 
@@ -27,7 +40,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow all origins in production since frontend is served from same origin
+# CORS — allow all origins since frontend is served from same origin in prod
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,21 +62,27 @@ async def health_check():
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 if STATIC_DIR.exists():
-    # Serve static assets (JS, CSS, images)
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+    logger.info(f"Serving frontend from {STATIC_DIR}")
 
-    # Serve favicon and other root-level static files
+    # Serve static assets (JS, CSS, images)
+    if (STATIC_DIR / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    # Serve favicon
     @app.get("/favicon.svg")
     async def favicon():
-        return FileResponse(STATIC_DIR / "favicon.svg")
+        favicon_path = STATIC_DIR / "favicon.svg"
+        if favicon_path.exists():
+            return FileResponse(favicon_path)
 
     # Catch-all: serve index.html for client-side routing
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # Don't catch API routes
         if full_path.startswith("api/"):
             return {"detail": "Not found"}
         file_path = STATIC_DIR / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(STATIC_DIR / "index.html")
+else:
+    logger.info("No static directory found — running API only (dev mode)")
