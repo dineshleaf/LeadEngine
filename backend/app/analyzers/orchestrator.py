@@ -50,7 +50,6 @@ class AnalysisOrchestrator:
 
         domain = lead.domain
         lead.status = "analyzing"
-        await db.flush()
 
         # Create or reset progress tracking
         progress_result = await db.execute(
@@ -64,113 +63,74 @@ class AnalysisOrchestrator:
         progress.overall_status = "running"
         progress.started_at = datetime.utcnow()
         progress.error_log = []
+
+        # Mark all modules as running
+        progress.ecommerce_status = "running"
+        progress.marketing_status = "running"
+        progress.hosting_status = "running"
+        progress.ads_status = "running"
+        progress.social_status = "running"
+        progress.contacts_status = "running"
+        progress.decision_makers_status = "running"
         await db.flush()
+        await db.commit()
 
         errors = []
         analysis_data = {"company_name": lead.company_name or domain}
 
-        # Run analyzers concurrently (grouped for dependency management)
-        # Group 1: Independent analyzers
-        async def run_ecommerce():
-            progress.ecommerce_status = "running"
-            await db.flush()
+        # Run all HTTP analyses concurrently (no DB operations here)
+        async def safe_analyze(name, analyzer):
             try:
-                data = await self.ecommerce.analyze(domain)
-                await self._save_ecommerce(db, lead_id, data)
-                progress.ecommerce_status = "completed"
-                analysis_data["ecommerce"] = data
+                return await analyzer.analyze(domain)
             except Exception as e:
-                progress.ecommerce_status = "failed"
-                errors.append(f"ecommerce: {str(e)}")
-                logger.error(f"Ecommerce analysis failed for {domain}: {e}")
+                logger.error(f"{name} analysis failed for {domain}: {e}")
+                return e
 
-        async def run_marketing():
-            progress.marketing_status = "running"
-            await db.flush()
-            try:
-                data = await self.marketing.analyze(domain)
-                await self._save_marketing(db, lead_id, data)
-                progress.marketing_status = "completed"
-                analysis_data["marketing_tools"] = data
-            except Exception as e:
-                progress.marketing_status = "failed"
-                errors.append(f"marketing: {str(e)}")
-                logger.error(f"Marketing analysis failed for {domain}: {e}")
-
-        async def run_hosting():
-            progress.hosting_status = "running"
-            await db.flush()
-            try:
-                data = await self.hosting.analyze(domain)
-                await self._save_hosting(db, lead_id, data)
-                progress.hosting_status = "completed"
-                analysis_data["hosting_email"] = data
-            except Exception as e:
-                progress.hosting_status = "failed"
-                errors.append(f"hosting: {str(e)}")
-                logger.error(f"Hosting analysis failed for {domain}: {e}")
-
-        async def run_ads():
-            progress.ads_status = "running"
-            await db.flush()
-            try:
-                data = await self.ads.analyze(domain)
-                await self._save_ads(db, lead_id, data)
-                progress.ads_status = "completed"
-                analysis_data["ad_activity"] = data
-            except Exception as e:
-                progress.ads_status = "failed"
-                errors.append(f"ads: {str(e)}")
-                logger.error(f"Ad analysis failed for {domain}: {e}")
-
-        async def run_social():
-            progress.social_status = "running"
-            await db.flush()
-            try:
-                data = await self.social.analyze(domain)
-                await self._save_social(db, lead_id, data)
-                progress.social_status = "completed"
-                analysis_data["social_media"] = data
-            except Exception as e:
-                progress.social_status = "failed"
-                errors.append(f"social: {str(e)}")
-                logger.error(f"Social analysis failed for {domain}: {e}")
-
-        async def run_contacts():
-            progress.contacts_status = "running"
-            await db.flush()
-            try:
-                data = await self.contacts.analyze(domain)
-                await self._save_contacts(db, lead_id, data)
-                progress.contacts_status = "completed"
-            except Exception as e:
-                progress.contacts_status = "failed"
-                errors.append(f"contacts: {str(e)}")
-                logger.error(f"Contact analysis failed for {domain}: {e}")
-
-        async def run_decision_makers():
-            progress.decision_makers_status = "running"
-            await db.flush()
-            try:
-                data = await self.decision_makers.analyze(domain)
-                await self._save_decision_makers(db, lead_id, data)
-                progress.decision_makers_status = "completed"
-            except Exception as e:
-                progress.decision_makers_status = "failed"
-                errors.append(f"decision_makers: {str(e)}")
-                logger.error(f"Decision maker analysis failed for {domain}: {e}")
-
-        # Run all independent analyzers concurrently
-        await asyncio.gather(
-            run_ecommerce(),
-            run_marketing(),
-            run_hosting(),
-            run_ads(),
-            run_social(),
-            run_contacts(),
-            run_decision_makers(),
-            return_exceptions=True,
+        results = await asyncio.gather(
+            safe_analyze("ecommerce", self.ecommerce),
+            safe_analyze("marketing", self.marketing),
+            safe_analyze("hosting", self.hosting),
+            safe_analyze("ads", self.ads),
+            safe_analyze("social", self.social),
+            safe_analyze("contacts", self.contacts),
+            safe_analyze("decision_makers", self.decision_makers),
         )
+
+        module_names = [
+            "ecommerce", "marketing", "hosting",
+            "ads", "social", "contacts", "decision_makers",
+        ]
+        save_fns = [
+            self._save_ecommerce, self._save_marketing, self._save_hosting,
+            self._save_ads, self._save_social, self._save_contacts,
+            self._save_decision_makers,
+        ]
+        status_fields = [
+            "ecommerce_status", "marketing_status", "hosting_status",
+            "ads_status", "social_status", "contacts_status",
+            "decision_makers_status",
+        ]
+        data_keys = [
+            "ecommerce", "marketing_tools", "hosting_email",
+            "ad_activity", "social_media", None, None,
+        ]
+
+        # Save results sequentially (safe for single DB session)
+        for i, (name, data) in enumerate(zip(module_names, results)):
+            if isinstance(data, Exception):
+                setattr(progress, status_fields[i], "failed")
+                errors.append(f"{name}: {str(data)}")
+            else:
+                try:
+                    await save_fns[i](db, lead_id, data)
+                    setattr(progress, status_fields[i], "completed")
+                    if data_keys[i]:
+                        analysis_data[data_keys[i]] = data
+                except Exception as e:
+                    setattr(progress, status_fields[i], "failed")
+                    errors.append(f"{name}: {str(e)}")
+                    logger.error(f"{name} save failed for {domain}: {e}")
+            await db.flush()
 
         # Run pitch generator (depends on other results)
         progress.pitch_status = "running"
