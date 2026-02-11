@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +8,8 @@ from app.core.database import get_db, async_session
 from app.core.models import AnalysisProgress, Lead
 from app.core.schemas import AnalysisStatusResponse, BulkAnalysisRequest
 from app.analyzers.orchestrator import orchestrator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -16,12 +20,15 @@ async def _run_analysis_task(lead_id: int):
         try:
             await orchestrator.run_analysis(lead_id, db)
         except Exception as e:
-            # Update lead status to failed
-            result = await db.execute(select(Lead).where(Lead.id == lead_id))
-            lead = result.scalar_one_or_none()
-            if lead:
-                lead.status = "failed"
+            logger.error(f"Analysis failed for lead {lead_id}: {e}", exc_info=True)
+            try:
+                result = await db.execute(select(Lead).where(Lead.id == lead_id))
+                lead = result.scalar_one_or_none()
+                if lead:
+                    lead.status = "failed"
                 await db.commit()
+            except Exception:
+                await db.rollback()
 
 
 @router.post("/{lead_id}", status_code=202)
@@ -39,6 +46,28 @@ async def trigger_analysis(
         raise HTTPException(status_code=409, detail="Analysis already in progress")
 
     lead.status = "analyzing"
+
+    # Create progress record immediately so frontend can poll it
+    progress_result = await db.execute(
+        select(AnalysisProgress).where(AnalysisProgress.lead_id == lead_id)
+    )
+    progress = progress_result.scalar_one_or_none()
+    if not progress:
+        progress = AnalysisProgress(lead_id=lead_id)
+        db.add(progress)
+    progress.overall_status = "pending"
+    progress.ecommerce_status = "pending"
+    progress.marketing_status = "pending"
+    progress.hosting_status = "pending"
+    progress.ads_status = "pending"
+    progress.social_status = "pending"
+    progress.contacts_status = "pending"
+    progress.decision_makers_status = "pending"
+    progress.pitch_status = "pending"
+    progress.started_at = None
+    progress.completed_at = None
+    progress.error_log = []
+
     await db.flush()
 
     background_tasks.add_task(_run_analysis_task, lead_id)

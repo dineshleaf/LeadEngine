@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,7 +62,7 @@ class AnalysisOrchestrator:
             db.add(progress)
 
         progress.overall_status = "running"
-        progress.started_at = datetime.now(timezone.utc)
+        progress.started_at = datetime.utcnow()
         progress.error_log = []
         await db.flush()
 
@@ -186,7 +186,7 @@ class AnalysisOrchestrator:
 
         # Finalize
         progress.error_log = errors
-        progress.completed_at = datetime.now(timezone.utc)
+        progress.completed_at = datetime.utcnow()
 
         if errors:
             if len(errors) >= 7:
