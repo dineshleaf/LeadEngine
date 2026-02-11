@@ -1,15 +1,29 @@
+import os
+
 from pydantic_settings import BaseSettings
 from typing import Optional
 
 
+def _get_database_url() -> str:
+    """Build the async database URL from environment variables."""
+    # Railway provides DATABASE_URL in postgres:// format
+    url = os.environ.get("DATABASE_URL", "")
+    if url:
+        # Convert postgres:// to postgresql+asyncpg://
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+    return "sqlite+aiosqlite:///./leadengine.db"
+
+
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite+aiosqlite:///./leadengine.db"
+    database_url: str = _get_database_url()
 
     # Server
     host: str = "0.0.0.0"
-    port: int = 8000
-    debug: bool = True
+    port: int = int(os.environ.get("PORT", "8000"))
+    debug: bool = os.environ.get("RAILWAY_ENVIRONMENT") is None
 
     # Rate Limiting
     requests_per_second: float = 2.0

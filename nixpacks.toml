@@ -1,0 +1,13 @@
+# Fallback if Railway uses Nixpacks instead of Dockerfile
+# The Dockerfile is preferred — this is just a safety net
+[phases.setup]
+nixPkgs = ["python311", "nodejs_20", "gcc"]
+
+[phases.build]
+cmds = [
+    "cd frontend && npm ci && npm run build && cp -r dist ../backend/static",
+    "cd backend && pip install -r requirements.txt"
+]
+
+[start]
+cmd = "cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
