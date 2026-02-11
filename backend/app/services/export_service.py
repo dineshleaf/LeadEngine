@@ -12,6 +12,7 @@ from app.core.models import Lead
 
 EXPORT_COLUMNS = [
     "domain", "company_name", "status", "source",
+    "country", "city", "state", "address",
     "is_ecommerce", "ecommerce_platform", "ecommerce_confidence",
     "has_google_analytics", "ga_version", "ga_id",
     "has_gtm", "gtm_id", "has_gsc",
@@ -40,6 +41,10 @@ def _flatten_lead(lead: Lead) -> dict:
         "company_name": lead.company_name or "",
         "status": lead.status,
         "source": lead.source,
+        "country": lead.country or "",
+        "city": lead.city or "",
+        "state": lead.state or "",
+        "address": lead.address or "",
     }
 
     ec = lead.ecommerce

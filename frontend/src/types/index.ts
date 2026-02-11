@@ -5,6 +5,10 @@ export interface Lead {
   company_name: string | null
   status: 'pending' | 'analyzing' | 'completed' | 'failed'
   source: string
+  country: string | null
+  state: string | null
+  city: string | null
+  address: string | null
   created_at: string
   updated_at: string
 }

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Play, ShoppingCart, BarChart3, Server, Megaphone,
   Share2, Users, Phone, MessageSquare, CheckCircle, XCircle,
-  ExternalLink, Copy, RefreshCw
+  ExternalLink, Copy, RefreshCw, MapPin
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLead } from '../api/leads'
@@ -98,6 +98,12 @@ export default function LeadDetailPage() {
                 </span>
               )}
             </p>
+            {(lead.city || lead.country) && (
+              <p className="text-sm text-gray-400 mt-0.5 flex items-center gap-1">
+                <MapPin className="h-3.5 w-3.5" />
+                {[lead.city, lead.state, lead.country].filter(Boolean).join(', ')}
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <a
@@ -145,6 +151,7 @@ export default function LeadDetailPage() {
                   status === 'completed' ? 'bg-green-100 text-green-700' :
                   status === 'running' ? 'bg-yellow-100 text-yellow-700' :
                   status === 'failed' ? 'bg-red-100 text-red-700' :
+                  status === 'skipped' ? 'bg-gray-100 text-gray-400 line-through' :
                   'bg-gray-100 text-gray-500'
                 }`}
               >

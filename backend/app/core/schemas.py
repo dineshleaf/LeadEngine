@@ -34,6 +34,10 @@ class LeadResponse(BaseModel):
     company_name: Optional[str] = None
     status: str
     source: str
+    country: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    address: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

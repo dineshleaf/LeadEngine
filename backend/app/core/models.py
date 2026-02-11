@@ -31,6 +31,10 @@ class Lead(Base):
     company_name = Column(String(255))
     status = Column(String(50), default="pending")
     source = Column(String(50), default="manual")
+    country = Column(String(100))
+    state = Column(String(100))
+    city = Column(String(100))
+    address = Column(String(500))
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

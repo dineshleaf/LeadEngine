@@ -25,6 +25,7 @@ from app.analyzers.social_media import SocialMediaAnalyzer
 from app.analyzers.decision_makers import DecisionMakerAnalyzer
 from app.analyzers.contact_info import ContactInfoAnalyzer
 from app.analyzers.pitch_generator import PitchGenerator
+from app.analyzers.location_detector import LocationDetector
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class AnalysisOrchestrator:
         self.decision_makers = DecisionMakerAnalyzer()
         self.contacts = ContactInfoAnalyzer()
         self.pitch_gen = PitchGenerator()
+        self.location = LocationDetector()
 
     async def run_analysis(self, lead_id: int, db: AsyncSession):
         # Get the lead
@@ -64,8 +66,79 @@ class AnalysisOrchestrator:
         progress.started_at = datetime.utcnow()
         progress.error_log = []
 
-        # Mark all modules as running
+        # Mark ecommerce as running, rest as pending
         progress.ecommerce_status = "running"
+        progress.marketing_status = "pending"
+        progress.hosting_status = "pending"
+        progress.ads_status = "pending"
+        progress.social_status = "pending"
+        progress.contacts_status = "pending"
+        progress.decision_makers_status = "pending"
+        progress.pitch_status = "pending"
+        await db.flush()
+        await db.commit()
+
+        errors = []
+        analysis_data = {"company_name": lead.company_name or domain}
+
+        async def safe_analyze(name, analyzer, *args):
+            try:
+                return await analyzer.analyze(domain, *args)
+            except Exception as e:
+                logger.error(f"{name} analysis failed for {domain}: {e}")
+                return e
+
+        # ── PHASE 1: E-commerce detection + Location (always run) ──
+        ecom_result, loc_result = await asyncio.gather(
+            safe_analyze("ecommerce", self.ecommerce),
+            safe_analyze("location", self.location),
+        )
+
+        # Save ecommerce result
+        is_ecommerce = False
+        if isinstance(ecom_result, Exception):
+            progress.ecommerce_status = "failed"
+            errors.append(f"ecommerce: {str(ecom_result)}")
+        else:
+            try:
+                await self._save_ecommerce(db, lead_id, ecom_result)
+                progress.ecommerce_status = "completed"
+                analysis_data["ecommerce"] = ecom_result
+                is_ecommerce = ecom_result.get("is_ecommerce", False)
+            except Exception as e:
+                progress.ecommerce_status = "failed"
+                errors.append(f"ecommerce: {str(e)}")
+
+        # Save location to Lead
+        if not isinstance(loc_result, Exception):
+            lead.country = loc_result.get("country")
+            lead.state = loc_result.get("state")
+            lead.city = loc_result.get("city")
+            lead.address = loc_result.get("address")
+
+        await db.flush()
+        await db.commit()
+
+        # ── PHASE 2: If NOT e-commerce, skip remaining modules ──
+        if not is_ecommerce:
+            logger.info(f"{domain} is not e-commerce — skipping remaining analysis")
+            progress.marketing_status = "skipped"
+            progress.hosting_status = "skipped"
+            progress.ads_status = "skipped"
+            progress.social_status = "skipped"
+            progress.contacts_status = "skipped"
+            progress.decision_makers_status = "skipped"
+            progress.pitch_status = "skipped"
+            progress.completed_at = datetime.utcnow()
+            progress.error_log = errors
+
+            lead.status = "completed"
+            progress.overall_status = "completed"
+            await db.flush()
+            await db.commit()
+            return
+
+        # ── PHASE 3: Full analysis for e-commerce sites ──
         progress.marketing_status = "running"
         progress.hosting_status = "running"
         progress.ads_status = "running"
@@ -75,19 +148,7 @@ class AnalysisOrchestrator:
         await db.flush()
         await db.commit()
 
-        errors = []
-        analysis_data = {"company_name": lead.company_name or domain}
-
-        # Run all HTTP analyses concurrently (no DB operations here)
-        async def safe_analyze(name, analyzer):
-            try:
-                return await analyzer.analyze(domain)
-            except Exception as e:
-                logger.error(f"{name} analysis failed for {domain}: {e}")
-                return e
-
         results = await asyncio.gather(
-            safe_analyze("ecommerce", self.ecommerce),
             safe_analyze("marketing", self.marketing),
             safe_analyze("hosting", self.hosting),
             safe_analyze("ads", self.ads),
@@ -96,26 +157,18 @@ class AnalysisOrchestrator:
             safe_analyze("decision_makers", self.decision_makers),
         )
 
-        module_names = [
-            "ecommerce", "marketing", "hosting",
-            "ads", "social", "contacts", "decision_makers",
-        ]
+        module_names = ["marketing", "hosting", "ads", "social", "contacts", "decision_makers"]
         save_fns = [
-            self._save_ecommerce, self._save_marketing, self._save_hosting,
-            self._save_ads, self._save_social, self._save_contacts,
-            self._save_decision_makers,
+            self._save_marketing, self._save_hosting, self._save_ads,
+            self._save_social, self._save_contacts, self._save_decision_makers,
         ]
         status_fields = [
-            "ecommerce_status", "marketing_status", "hosting_status",
-            "ads_status", "social_status", "contacts_status",
-            "decision_makers_status",
+            "marketing_status", "hosting_status", "ads_status",
+            "social_status", "contacts_status", "decision_makers_status",
         ]
-        data_keys = [
-            "ecommerce", "marketing_tools", "hosting_email",
-            "ad_activity", "social_media", None, None,
-        ]
+        data_keys = ["marketing_tools", "hosting_email", "ad_activity", "social_media", None, None]
 
-        # Save results sequentially (safe for single DB session)
+        # Save results sequentially
         for i, (name, data) in enumerate(zip(module_names, results)):
             if isinstance(data, Exception):
                 setattr(progress, status_fields[i], "failed")
@@ -132,7 +185,7 @@ class AnalysisOrchestrator:
                     logger.error(f"{name} save failed for {domain}: {e}")
             await db.flush()
 
-        # Run pitch generator (depends on other results)
+        # ── PHASE 4: Pitch generation ──
         progress.pitch_status = "running"
         await db.flush()
         try:
@@ -149,7 +202,7 @@ class AnalysisOrchestrator:
         progress.completed_at = datetime.utcnow()
 
         if errors:
-            if len(errors) >= 7:
+            if len(errors) >= 6:
                 lead.status = "failed"
                 progress.overall_status = "failed"
             else:
@@ -223,7 +276,6 @@ class AnalysisOrchestrator:
         await db.flush()
 
     async def _save_contacts(self, db: AsyncSession, lead_id: int, data: dict):
-        # Delete existing contacts and add new ones
         existing = await db.execute(
             select(ContactInfo).where(ContactInfo.lead_id == lead_id)
         )
@@ -235,7 +287,6 @@ class AnalysisOrchestrator:
         await db.flush()
 
     async def _save_decision_makers(self, db: AsyncSession, lead_id: int, data: dict):
-        # Delete existing and add new ones
         existing = await db.execute(
             select(DecisionMaker).where(DecisionMaker.lead_id == lead_id)
         )

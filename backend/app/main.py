@@ -25,6 +25,16 @@ async def lifespan(app: FastAPI):
         logger.info("Creating database tables...")
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Add new columns to existing tables (safe for both SQLite and PostgreSQL)
+            from sqlalchemy import text, inspect as sa_inspect
+            def _add_missing_columns(connection):
+                inspector = sa_inspect(connection)
+                leads_cols = {c["name"] for c in inspector.get_columns("leads")}
+                for col_name, col_type in [("country", "VARCHAR(100)"), ("state", "VARCHAR(100)"), ("city", "VARCHAR(100)"), ("address", "VARCHAR(500)")]:
+                    if col_name not in leads_cols:
+                        connection.execute(text(f'ALTER TABLE leads ADD COLUMN {col_name} {col_type}'))
+                        logger.info(f"Added column leads.{col_name}")
+            await conn.run_sync(_add_missing_columns)
         logger.info("Database tables ready.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")

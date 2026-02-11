@@ -75,6 +75,24 @@ async def trigger_analysis(
     return {"message": "Analysis started", "lead_id": lead_id}
 
 
+@router.post("/all-pending", status_code=202)
+async def trigger_all_pending(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Lead).where(Lead.status == "pending"))
+    pending_leads = result.scalars().all()
+    if not pending_leads:
+        return {"message": "No pending leads to analyze", "lead_ids": []}
+    started = []
+    for lead in pending_leads:
+        lead.status = "analyzing"
+        background_tasks.add_task(_run_analysis_task, lead.id)
+        started.append(lead.id)
+    await db.flush()
+    return {"message": f"Analysis started for {len(started)} leads", "lead_ids": started}
+
+
 @router.post("/bulk", status_code=202)
 async def trigger_bulk_analysis(
     data: BulkAnalysisRequest,
